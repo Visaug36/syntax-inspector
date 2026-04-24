@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "syntax-inspector",
+      "runtimeExecutable": "/Users/naramalawar36/Library/Caches/ms-playwright-go/1.50.1/node",
+      "runtimeArgs": ["/tmp/npm-bootstrap/package/bin/npm-cli.js", "run", "dev", "--", "--port", "3030"],
+      "env": { "PATH": "/Users/naramalawar36/Library/Caches/ms-playwright-go/1.50.1:/usr/bin:/bin" },
+      "port": 3030
+    }
+  ]
+}
