@@ -34,6 +34,9 @@ jobs:
       - run: npm run build
         env:
           NODE_ENV: production
+          # Backend URL baked in at build time so the deployed bundle calls
+          # the right host. Change here, push, and the next build picks it up.
+          VITE_SANDBOX_URL: https://syntax-checker-backend-mhpo.onrender.com
 
       - uses: actions/configure-pages@v5
 
