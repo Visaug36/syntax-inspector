@@ -28,7 +28,11 @@ export function runCheck(code, plugins, type) {
         allowAwaitOutsideFunction:   true,
         allowImportExportEverywhere: true,
       })
-      for (const err of (ast.errors ?? [])) errors.push(toDiag(err, type))
+      // Collapse cascade WITHIN this parse iteration only.
+      // ast.errors typically contains the parser flailing past one bad token
+      // (same message, adjacent positions) — keep just the first.
+      const iterDiags = (ast.errors ?? []).map(e => toDiag(e, type))
+      errors.push(...collapseCascade(iterDiags))
       break
     } catch (err) {
       const diag = toDiag(err, type)
@@ -41,7 +45,7 @@ export function runCheck(code, plugins, type) {
     }
   }
 
-  return dedupe(errors)
+  return dedupeExact(errors)
 }
 
 function maskLine(code, lineNum) {
@@ -51,22 +55,30 @@ function maskLine(code, lineNum) {
   return lines.join('\n')
 }
 
-// Dedupe exact repeats AND collapse consecutive cascading errors that share a
-// message template (e.g. "Unexpected token, expected '{'" repeating 4 times
-// as the parser flails past one missing brace).
-function dedupe(errors) {
+// Within one parse iteration, Babel's errorRecovery often emits the same
+// message at adjacent positions — that's the parser flailing past a single
+// bad token. Keep only the first; the rest are noise.
+function collapseCascade(diags) {
   const out = []
-  const seen = new Set()
   let lastMsg = null
-  for (const e of errors) {
-    const k = `${e.line}:${e.column}:${e.message}`
-    if (seen.has(k)) continue
-    seen.add(k)
-    if (e.message === lastMsg) continue
-    out.push(e)
-    lastMsg = e.message
+  for (const d of diags) {
+    if (d.message === lastMsg) continue
+    out.push(d)
+    lastMsg = d.message
   }
   return out
+}
+
+// Across the full result list, drop only literal (line, col, message) repeats.
+// Same message at different lines = different bugs; keep both.
+function dedupeExact(errors) {
+  const seen = new Set()
+  return errors.filter(e => {
+    const k = `${e.line}:${e.column}:${e.message}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
 }
 
 function toDiag(err, type) {

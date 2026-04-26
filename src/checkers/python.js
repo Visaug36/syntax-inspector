@@ -152,10 +152,13 @@ export function check(code) {
     const m = trimmed.match(BLOCK_KWS)
     if (!m) continue
 
-    const kw    = m[2].replace(/\s+/g, ' ')
-    const lastCh = trimmed[trimmed.length - 1]
+    const kw = m[2].replace(/\s+/g, ' ')
 
-    if (lastCh !== ':') {
+    // The statement-introducing colon can appear anywhere on the line as long
+    // as it's at top-level (outside brackets/strings) and not part of `:=`
+    // (walrus operator). `if (n := 10) > 5: print(n)` is valid even though
+    // the line doesn't END in `:`.
+    if (!hasTopLevelColon(trimmed)) {
       errors.push({
         line: li + 1,
         column: trimmed.length,
@@ -183,6 +186,25 @@ export function check(code) {
   }
 
   return errors
+}
+
+// True if `line` contains a `:` at top-level (depth 0, outside strings) that
+// isn't part of `:=` (walrus). Used to decide if a block keyword line has its
+// statement-ending colon — which can be mid-line in valid Python.
+function hasTopLevelColon(line) {
+  let depth = 0, inD = false, inS = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    const n = line[i + 1] ?? ''
+    if (c === '\\') { i++; continue }
+    if (!inS && c === '"')      { inD = !inD; continue }
+    if (!inD && c === "'")      { inS = !inS; continue }
+    if (inD || inS) continue
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') depth--
+    else if (c === ':' && depth === 0 && n !== '=') return true
+  }
+  return false
 }
 
 function stripInlineComment(line) {

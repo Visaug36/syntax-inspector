@@ -10,12 +10,17 @@ export function check(code) {
   const lineM = text.match(/line[:\s]+(\d+)/i)
   const colM  = text.match(/column[:\s]+(\d+)/i)
 
-  // Strip "error on line N at column M:" prefix and grab first meaningful line
+  // Browsers wrap parser errors in chrome like "This page contains the
+  // following errors: error on line N at column M:" — strip the chrome and
+  // keep the actual diagnostic, which is the first non-empty line after.
   const msg = text
+    .replace(/^This page contains the following errors:\s*/i, '')
+    .replace(/Below is a rendering of the page up to the first error\.?\s*$/i, '')
     .replace(/error on line \d+ at column \d+:\s*/i, '')
     .trim()
-    .split('\n')[0]
-    .trim()
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)[0] ?? text
 
   return [{
     line:    lineM ? parseInt(lineM[1]) : 1,
