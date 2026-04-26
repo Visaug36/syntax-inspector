@@ -6,11 +6,15 @@ import { check as checkHtml } from './html.js'
 import { check as checkCss  } from './css.js'
 import { check as checkSql  } from './sql.js'
 import { check as checkYaml } from './yaml.js'
+import { checkRemote, REMOTE_LANGUAGES } from './_remote.js'
 
 export const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', ext: '.js' },
   { id: 'typescript', label: 'TypeScript', ext: '.ts' },
   { id: 'python',     label: 'Python',     ext: '.py' },
+  { id: 'cpp',        label: 'C++',        ext: '.cpp', remote: true },
+  { id: 'java',       label: 'Java',       ext: '.java', remote: true },
+  { id: 'ruby',       label: 'Ruby',       ext: '.rb', remote: true },
   { id: 'json',       label: 'JSON',       ext: '.json' },
   { id: 'html',       label: 'HTML',       ext: '.html' },
   { id: 'css',        label: 'CSS',        ext: '.css' },
@@ -29,9 +33,14 @@ const CHECKERS = {
   yaml:       checkYaml,
 }
 
+// Sync wrapper used by App.jsx — returns either Diagnostic[] or a Promise
+// (for languages that need the backend). The caller awaits as needed.
 export function checkCode(code, language) {
+  if (REMOTE_LANGUAGES.includes(language)) return checkRemote(language, code)
   return CHECKERS[language]?.(code) ?? []
 }
+
+export { REMOTE_LANGUAGES }
 
 /** Guess language from file extension or code content heuristics */
 export function detectLanguage(filename, code = '') {
@@ -41,6 +50,9 @@ export function detectLanguage(filename, code = '') {
       js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
       ts: 'typescript', tsx: 'typescript',
       py: 'python',
+      cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp', h: 'cpp', c: 'cpp',
+      java: 'java',
+      rb: 'ruby',
       json: 'json',
       html: 'html', htm: 'html',
       css: 'css',
@@ -51,7 +63,10 @@ export function detectLanguage(filename, code = '') {
   }
 
   const c = code.slice(0, 500)
-  if (/^#!.*python/i.test(c) || /^\s*def\s+\w+|^\s*class\s+\w+|^\s*import\s+\w+/m.test(c)) return 'python'
+  if (/^\s*#include\s*[<"]/m.test(c) || /\bstd::|\bcout\s*<<|using\s+namespace/m.test(c)) return 'cpp'
+  if (/\bpublic\s+(static\s+)?class\b|\bSystem\.out\./m.test(c)) return 'java'
+  if (/^\s*(require|require_relative)\s+['"]|^\s*def\s+\w+\s*$|\bend\s*$/m.test(c) && !/^\s*def\s+\w+\s*\(.*\):/m.test(c)) return 'ruby'
+  if (/^#!.*python/i.test(c) || /^\s*def\s+\w+\s*\(.*\):|^\s*class\s+\w+|^\s*import\s+\w+/m.test(c)) return 'python'
   if (/^\s*<(!DOCTYPE|html|head|body)/i.test(c)) return 'html'
   if (/^\s*SELECT\s|^\s*INSERT\s|^\s*UPDATE\s|^\s*CREATE\s/im.test(c)) return 'sql'
   if (/^\s*[\{\[]/.test(c) && /"[^"]+"\s*:/.test(c)) return 'json'
@@ -156,4 +171,33 @@ config:
   debug: true
   log_level: [info
   max_connections: 10`,
+
+  cpp: `// Three real bugs g++ will catch
+#include <iostream>
+
+int main() {
+    int x = 5
+    std::cout << y << std::endl;
+    return 0
+}`,
+
+  java: `// javac will report each error with rich messages
+public class Main {
+    public static void main(String[] args) {
+        int count = 5
+        System.out.println("Count: " + count)
+        if (count > 0)
+            System.out.println("positive"
+    }
+}`,
+
+  ruby: `# ruby -c catches each parse error
+def greet(name)
+  puts "Hello, #{name}"
+  if name.length > 0
+    puts "welcome"
+
+end
+
+greet("world"`,
 }

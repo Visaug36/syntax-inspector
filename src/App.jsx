@@ -38,11 +38,27 @@ export default function App() {
   const languageRef   = useRef('javascript')
 
   // ── Core: run checker and push diagnostics back to editor ──────────────────
+  // checkCode may return Diagnostic[] (sync) OR a Promise<Diagnostic[]> for
+  // remote-checked languages (C++, Java, Ruby). Sequence number guards
+  // against stale promises overwriting newer results.
+  const checkSeqRef = useRef(0)
   const runCheck = useCallback((code, lang) => {
-    setIsChecking(false)
-    const diags = checkCode(code, lang)
-    setDiagnostics(diags)
-    editorRef.current?.pushDiagnostics(diags)
+    const seq = ++checkSeqRef.current
+    const result = checkCode(code, lang)
+
+    if (result instanceof Promise) {
+      setIsChecking(true)
+      result.then(diags => {
+        if (seq !== checkSeqRef.current) return // stale — newer check started
+        setIsChecking(false)
+        setDiagnostics(diags)
+        editorRef.current?.pushDiagnostics(diags)
+      })
+    } else {
+      setIsChecking(false)
+      setDiagnostics(result)
+      editorRef.current?.pushDiagnostics(result)
+    }
   }, [])
 
   // ── Editor onChange (fires on every keystroke) ──────────────────────────────
