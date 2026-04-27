@@ -31,7 +31,12 @@ export function runCheck(code, plugins, type) {
       // Collapse cascade WITHIN this parse iteration only.
       // ast.errors typically contains the parser flailing past one bad token
       // (same message, adjacent positions) — keep just the first.
-      const iterDiags = (ast.errors ?? []).map(e => toDiag(e, type))
+      // Also drop semantic errors (already-declared identifiers, etc.) —
+      // those aren't syntax bugs, and students learning syntax shouldn't
+      // see "Identifier 'x' has already been declared" mixed in.
+      const iterDiags = (ast.errors ?? [])
+        .map(e => toDiag(e, type))
+        .filter(d => !isSemanticError(d.message))
       errors.push(...collapseCascade(iterDiags))
       break
     } catch (err) {
@@ -46,6 +51,17 @@ export function runCheck(code, plugins, type) {
   }
 
   return dedupeExact(errors)
+}
+
+// Babel surfaces a few binding/scope errors via errorRecovery that aren't
+// syntax issues. Keep them out of student-facing diagnostics.
+const SEMANTIC_PATTERNS = [
+  /already been declared/i,
+  /Cannot find module/i,
+  /Cannot redeclare block-scoped/i,
+]
+function isSemanticError(msg) {
+  return SEMANTIC_PATTERNS.some(rx => rx.test(msg))
 }
 
 function maskLine(code, lineNum) {

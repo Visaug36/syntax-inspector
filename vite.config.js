@@ -14,7 +14,7 @@ export default defineConfig({
     global: 'globalThis',
   },
   optimizeDeps: {
-    include: ['acorn', '@babel/parser', 'css-tree', 'js-yaml'],
+    include: ['@babel/parser', 'css-tree', 'js-yaml'],
   },
   resolve: {
     alias: {

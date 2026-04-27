@@ -9,7 +9,9 @@ function getParser() {
 export function check(code) {
   if (!code.trim()) return []
   try {
-    getParser().parse(code)
+    // PostgreSQL is the broadest dialect for educational use — accepts
+    // INTERVAL '7 days', RETURNING, ::cast, etc. that MySQL default rejects.
+    getParser().parse(code, { database: 'PostgreSQL' })
     return []
   } catch (err) {
     const msg  = (err.message || String(err)).split('\n')[0]

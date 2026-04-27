@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { createEditor } from './editor/setup.js'
-import { checkCode, LANGUAGES, SAMPLES, detectLanguage } from './checkers/index.js'
+import { checkCode, LANGUAGES, SAMPLES, detectLanguage, REMOTE_LANGUAGES } from './checkers/index.js'
 import ErrorCard from './components/ErrorCard.jsx'
 
-const DEBOUNCE_MS = 450
+// Local checkers run in <50ms — keep tight feedback. Remote checks hit a
+// possibly-cold backend, so wait longer to avoid hammering Render and to
+// stop firing for every keystroke.
+const DEBOUNCE_LOCAL_MS  = 450
+const DEBOUNCE_REMOTE_MS = 1500
 
 // ── URL hash share: encode {lang, code} so a link reproduces the session ──
 function encodeHash(lang, code) {
@@ -67,9 +71,12 @@ export default function App() {
     setIsEmpty(!code.trim())
     setIsChecking(true)
     clearTimeout(debounceRef.current)
+    const wait = REMOTE_LANGUAGES.includes(languageRef.current)
+      ? DEBOUNCE_REMOTE_MS
+      : DEBOUNCE_LOCAL_MS
     debounceRef.current = setTimeout(() => {
       runCheck(code, languageRef.current)
-    }, DEBOUNCE_MS)
+    }, wait)
   }, [runCheck])
 
   // ── Mount editor once + restore from URL hash if present ──────────────────
@@ -98,6 +105,9 @@ export default function App() {
 
   // ── Language change ─────────────────────────────────────────────────────────
   const handleLanguageChange = useCallback((lang) => {
+    // Cancel any pending debounced check from previous language so it doesn't
+    // race with the fresh check we're about to fire below.
+    clearTimeout(debounceRef.current)
     setLanguage(lang)
     languageRef.current = lang
     editorRef.current?.setLanguage(lang)
@@ -204,6 +214,11 @@ export default function App() {
   const hasErrors  = diagnostics.length > 0
   const isClean    = !isEmpty && !hasErrors && !isChecking
   const errorCount = diagnostics.length
+  const isRemote   = REMOTE_LANGUAGES.includes(language)
+  // Show explicit "checking remotely" state only for languages that
+  // actually go to the network — for fast local checks, the in-flight
+  // window is too short to bother surfacing.
+  const showRemoteLoading = isChecking && isRemote && !isEmpty
 
   return (
     <div className="app">
@@ -265,7 +280,7 @@ export default function App() {
               Upload
               <input
                 type="file"
-                accept=".js,.jsx,.ts,.tsx,.py,.json,.html,.htm,.css,.sql,.yaml,.yml"
+                accept=".js,.jsx,.ts,.tsx,.py,.cpp,.cc,.cxx,.hpp,.h,.c,.java,.rb,.json,.html,.htm,.css,.sql,.yaml,.yml"
                 onChange={handleUpload}
                 hidden
               />
@@ -288,12 +303,22 @@ export default function App() {
             {errorCount > 0 && <span className="diag-count">{errorCount} issue{errorCount > 1 ? 's' : ''}</span>}
           </div>
 
-          <div className="results-scroll">
+          <div className="results-scroll" role="region" aria-live="polite" aria-atomic="false">
             {isEmpty ? (
               <div className="empty-state">
                 <p className="empty-heading">Ready to inspect.</p>
                 <p className="empty-sub">
                   Paste code, upload a file, or hit <strong>Try sample</strong> to see errors surface inline.
+                </p>
+              </div>
+            ) : showRemoteLoading ? (
+              <div className="loading-state" role="status">
+                <div className="loading-pulse" aria-hidden="true">
+                  <span /><span /><span />
+                </div>
+                <p className="loading-heading">Checking with the {language === 'cpp' ? 'C++' : language[0].toUpperCase() + language.slice(1)} compiler…</p>
+                <p className="loading-sub">
+                  First check after idle takes about 30 seconds — the syntax server is waking up.
                 </p>
               </div>
             ) : isClean ? (
@@ -310,6 +335,7 @@ export default function App() {
                     index={i}
                     diagnostic={d}
                     code={codeRef.current}
+                    onJumpTo={(line, col) => editorRef.current?.jumpTo(line, col)}
                   />
                 ))}
               </div>

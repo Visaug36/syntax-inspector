@@ -99,6 +99,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 button { background: none; border: none; cursor: pointer; }
 
+/* Universal focus ring — keyboard users can always see where they are.
+   Buttons that already define their own focus-visible (action-btn, etc.)
+   override this. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 kbd {
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -483,6 +492,55 @@ body::before {
   font-family: var(--font-serif);
 }
 
+/* ── Loading state (remote checks during cold start) ────────────────────── */
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  min-height: 280px;
+  padding: 40px 4px;
+  max-width: 380px;
+}
+
+.loading-pulse {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.loading-pulse span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: loadPulse 1.1s var(--ease) infinite;
+}
+.loading-pulse span:nth-child(2) { animation-delay: 0.18s; }
+.loading-pulse span:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes loadPulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40%           { opacity: 1;    transform: scale(1.1); }
+}
+
+.loading-heading {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 300;
+  font-style: italic;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+.loading-sub {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+
 /* ── Clean / success state ────────────────────────────────────────────────── */
 
 .clean-state {
@@ -536,6 +594,17 @@ body::before {
   padding: 4px 0 28px 0;
   border-bottom: 1px solid var(--rule-soft);
   animation: errorSlideIn 480ms var(--ease) both;
+  cursor: pointer;
+  transition: background 180ms var(--ease);
+  border-radius: 4px;
+}
+.error-card:hover {
+  background: color-mix(in srgb, var(--error-wash) 60%, transparent);
+}
+.error-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  background: color-mix(in srgb, var(--error-wash) 60%, transparent);
 }
 .error-card:last-child { border-bottom: none; padding-bottom: 0; }
 
@@ -591,6 +660,29 @@ body::before {
   border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
   border-radius: 2px;
 }
+
+/* Copy button — sits in the error-meta row, surfaces on card hover/focus.
+   stopPropagation in the handler keeps clicks from triggering jump-to. */
+.error-copy-btn {
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  border-radius: 2px;
+  opacity: 0;
+  transition: all 160ms var(--ease);
+}
+.error-card:hover  .error-copy-btn,
+.error-card:focus-within .error-copy-btn,
+.error-copy-btn:focus-visible { opacity: 1; }
+.error-copy-btn:hover { color: var(--ink); border-color: var(--rule); background: var(--paper); }
+.error-copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .error-message {
   font-family: var(--font-serif);
@@ -678,10 +770,21 @@ body::before {
 
 @media (max-width: 900px) {
   .topbar { padding: 0 16px; grid-template-columns: 1fr auto; }
+  /* Move language picker into the action bar on mobile so it doesn't
+     compete with the wordmark for header space */
   .topbar-center { display: none; }
-  .pane-input   { flex: 0 0 100%; }
-  .pane-results { display: none; }
+
+  /* Stack input + results vertically. Editor takes top half, diagnostics
+     take the rest — both visible, both scrollable independently. */
   .workspace    { flex-direction: column; }
+  .pane-input   { flex: 0 0 50vh; min-height: 240px; }
+  .pane-results { flex: 1; min-height: 200px; }
+  .pane-divider { width: 100%; height: 1px; }
+
+  /* Keep action-bar usable; allow wrapping */
+  .pane-actions { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+  .pane-label   { padding: 12px 16px 8px; }
+  .results-scroll { padding: 16px 16px 32px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

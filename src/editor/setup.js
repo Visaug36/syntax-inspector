@@ -129,6 +129,15 @@ export function createEditor(parent, { onChange, initialCode = '' } = {}) {
       })
     },
 
+    jumpTo(line, column = 0) {
+      const pos = lineColToPos(view.state.doc, line, column)
+      view.dispatch({
+        selection: { anchor: pos },
+        scrollIntoView: true,
+      })
+      view.focus()
+    },
+
     pushDiagnostics(rawDiags) {
       const doc = view.state.doc
       const cmDiags = rawDiags.map(d => {

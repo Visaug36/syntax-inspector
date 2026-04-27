@@ -1,5 +1,8 @@
 export function check(code) {
   if (!code.trim()) return []
+  // Strip UTF-8 BOM — files exported from Excel/Notepad/Visual Studio often
+  // include one and JSON.parse rejects them.
+  if (code.charCodeAt(0) === 0xFEFF) code = code.slice(1)
   try {
     JSON.parse(code)
     return []
