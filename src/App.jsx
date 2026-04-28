@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { createEditor } from './editor/setup.js'
-import { checkCode, LANGUAGES, SAMPLES, detectLanguage, REMOTE_LANGUAGES } from './checkers/index.js'
-import ErrorCard from './components/ErrorCard.jsx'
+import { SAMPLES, detectLanguage, REMOTE_LANGUAGES } from './checkers/index.js'
+import { useChecker } from './hooks/useChecker.js'
+import TopBar      from './components/TopBar.jsx'
+import EditorPane  from './components/EditorPane.jsx'
+import ResultsPane from './components/ResultsPane.jsx'
+import Footer      from './components/Footer.jsx'
 
-// Local checkers run in <50ms — keep tight feedback. Remote checks hit a
-// possibly-cold backend, so wait longer to avoid hammering Render and to
-// stop firing for every keystroke.
-const DEBOUNCE_LOCAL_MS  = 450
-const DEBOUNCE_REMOTE_MS = 1500
+// ── Lightweight persistence: remember the user's language pick and theme
+//    across sessions. Keys are namespaced; reads are guarded so SSR or
+//    blocked-storage environments fall through to defaults silently.
+const LS_LANG  = 'si:lang'
+const LS_THEME = 'si:theme'
+const safeRead  = (k, fb) => { try { return localStorage.getItem(k) ?? fb } catch { return fb } }
+const safeWrite = (k, v)  => { try { localStorage.setItem(k, v) }       catch { /* ignored */ } }
 
 // ── URL hash share: encode {lang, code} so a link reproduces the session ──
 function encodeHash(lang, code) {
@@ -29,57 +35,38 @@ function decodeHash(hash) {
 }
 
 export default function App() {
-  const [language,    setLanguage]    = useState('javascript')
-  const [diagnostics, setDiagnostics] = useState([])
+  // ── State ────────────────────────────────────────────────────────────────
+  const [language,    setLanguage]    = useState(() => safeRead(LS_LANG, 'javascript'))
   const [isEmpty,     setIsEmpty]     = useState(true)
-  const [isDark,      setIsDark]      = useState(false)
-  const [isChecking,  setIsChecking]  = useState(false)
+  const [isDark,      setIsDark]      = useState(() => safeRead(LS_THEME, 'light') === 'dark')
+  const [shareStatus, setShareStatus] = useState(null)
 
-  const editorDomRef  = useRef(null)
-  const editorRef     = useRef(null)
-  const debounceRef   = useRef(null)
-  const codeRef       = useRef('')
-  const languageRef   = useRef('javascript')
+  const editorDomRef = useRef(null)
+  const editorRef    = useRef(null)
+  const codeRef      = useRef('')
+  const languageRef  = useRef(language)
 
-  // ── Core: run checker and push diagnostics back to editor ──────────────────
-  // checkCode may return Diagnostic[] (sync) OR a Promise<Diagnostic[]> for
-  // remote-checked languages (C++, Java, Ruby). Sequence number guards
-  // against stale promises overwriting newer results.
-  const checkSeqRef = useRef(0)
-  const runCheck = useCallback((code, lang) => {
-    const seq = ++checkSeqRef.current
-    const result = checkCode(code, lang)
+  const { diagnostics, isChecking, run, debounce, reset } = useChecker()
 
-    if (result instanceof Promise) {
-      setIsChecking(true)
-      result.then(diags => {
-        if (seq !== checkSeqRef.current) return // stale — newer check started
-        setIsChecking(false)
-        setDiagnostics(diags)
-        editorRef.current?.pushDiagnostics(diags)
-      })
-    } else {
-      setIsChecking(false)
-      setDiagnostics(result)
-      editorRef.current?.pushDiagnostics(result)
-    }
-  }, [])
+  // ── Derived state ────────────────────────────────────────────────────────
+  const errorCount        = diagnostics.length
+  const hasErrors         = errorCount > 0
+  const isClean           = !isEmpty && !hasErrors && !isChecking
+  const showRemoteLoading = isChecking && REMOTE_LANGUAGES.includes(language) && !isEmpty
 
-  // ── Editor onChange (fires on every keystroke) ──────────────────────────────
+  // ── Sync diagnostics into the editor's lint gutter ──────────────────────
+  useEffect(() => {
+    editorRef.current?.pushDiagnostics(diagnostics)
+  }, [diagnostics])
+
+  // ── Editor onChange (fires on every keystroke) ──────────────────────────
   const handleCodeChange = useCallback((code) => {
     codeRef.current = code
     setIsEmpty(!code.trim())
-    setIsChecking(true)
-    clearTimeout(debounceRef.current)
-    const wait = REMOTE_LANGUAGES.includes(languageRef.current)
-      ? DEBOUNCE_REMOTE_MS
-      : DEBOUNCE_LOCAL_MS
-    debounceRef.current = setTimeout(() => {
-      runCheck(code, languageRef.current)
-    }, wait)
-  }, [runCheck])
+    debounce(code, languageRef.current)
+  }, [debounce])
 
-  // ── Mount editor once + restore from URL hash if present ──────────────────
+  // ── Mount editor once + restore from URL hash if present ────────────────
   useEffect(() => {
     if (!editorDomRef.current) return
     editorDomRef.current.innerHTML = ''
@@ -87,14 +74,16 @@ export default function App() {
     editorRef.current = ed
 
     const shared = decodeHash(window.location.hash)
+    const initialLang = shared?.language ?? language
+    ed.setLanguage(initialLang)
+
     if (shared) {
       setLanguage(shared.language)
       languageRef.current = shared.language
-      ed.setLanguage(shared.language)
       ed.setCode(shared.code)
       codeRef.current = shared.code
       setIsEmpty(!shared.code.trim())
-      runCheck(shared.code, shared.language)
+      run(shared.code, shared.language)
     }
 
     return () => {
@@ -103,62 +92,61 @@ export default function App() {
     }
   }, []) // intentionally no deps — created once
 
-  // ── Language change ─────────────────────────────────────────────────────────
-  const handleLanguageChange = useCallback((lang) => {
-    // Cancel any pending debounced check from previous language so it doesn't
-    // race with the fresh check we're about to fire below.
-    clearTimeout(debounceRef.current)
-    setLanguage(lang)
-    languageRef.current = lang
-    editorRef.current?.setLanguage(lang)
-    runCheck(codeRef.current, lang)
-  }, [runCheck])
-
-  // ── Theme toggle ────────────────────────────────────────────────────────────
+  // ── Theme toggle ────────────────────────────────────────────────────────
   useEffect(() => {
     editorRef.current?.setTheme(isDark ? oneDark : [])
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+    safeWrite(LS_THEME, isDark ? 'dark' : 'light')
   }, [isDark])
 
-  // ── Keyboard shortcut: Cmd/Ctrl+Enter ──────────────────────────────────────
+  // ── Keyboard shortcut: Cmd/Ctrl+Enter ───────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault()
-        clearTimeout(debounceRef.current)
-        runCheck(codeRef.current, languageRef.current)
+        run(codeRef.current, languageRef.current)
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [runCheck])
+  }, [run])
 
-  // ── Clipboard / file actions ────────────────────────────────────────────────
+  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleLanguageChange = useCallback((lang) => {
+    setLanguage(lang)
+    languageRef.current = lang
+    safeWrite(LS_LANG, lang)
+    editorRef.current?.setLanguage(lang)
+    run(codeRef.current, lang)
+  }, [run])
+
+  const applyContent = useCallback((text, lang) => {
+    editorRef.current?.setCode(text)
+    editorRef.current?.setLanguage(lang)
+    setLanguage(lang)
+    languageRef.current = lang
+    safeWrite(LS_LANG, lang)
+    codeRef.current = text
+    setIsEmpty(!text.trim())
+    run(text, lang)
+  }, [run])
+
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText()
       if (!text) return
-      const lang = detectLanguage('', text)
-      editorRef.current?.setCode(text)
-      editorRef.current?.setLanguage(lang)
-      setLanguage(lang)
-      languageRef.current = lang
-      codeRef.current = text
-      setIsEmpty(false)
-      runCheck(text, lang)
+      applyContent(text, detectLanguage('', text))
     } catch { /* clipboard permission denied */ }
   }
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(codeRef.current)
-    } catch { /* clipboard permission denied */ }
+    try { await navigator.clipboard.writeText(codeRef.current) } catch {}
   }
 
   const handleClear = () => {
     editorRef.current?.setCode('')
     editorRef.current?.clearDiagnostics()
-    setDiagnostics([])
+    reset()
     setIsEmpty(true)
     codeRef.current = ''
   }
@@ -167,17 +155,7 @@ export default function App() {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = ev.target.result
-      const lang = detectLanguage(file.name, text)
-      editorRef.current?.setCode(text)
-      editorRef.current?.setLanguage(lang)
-      setLanguage(lang)
-      languageRef.current = lang
-      codeRef.current = text
-      setIsEmpty(false)
-      runCheck(text, lang)
-    }
+    reader.onload = (ev) => applyContent(ev.target.result, detectLanguage(file.name, ev.target.result))
     reader.readAsText(file)
     e.target.value = ''
   }
@@ -186,16 +164,12 @@ export default function App() {
     const sample = SAMPLES[languageRef.current] ?? ''
     editorRef.current?.setCode(sample)
     codeRef.current = sample
-    setIsEmpty(false)
-    runCheck(sample, languageRef.current)
+    setIsEmpty(!sample.trim())
+    run(sample, languageRef.current)
   }
 
-  const handleRunCheck = () => {
-    clearTimeout(debounceRef.current)
-    runCheck(codeRef.current, languageRef.current)
-  }
+  const handleRunCheck = () => run(codeRef.current, languageRef.current)
 
-  const [shareStatus, setShareStatus] = useState(null)
   const handleShare = async () => {
     const hash = encodeHash(languageRef.current, codeRef.current)
     if (!hash) return
@@ -210,156 +184,51 @@ export default function App() {
     setTimeout(() => setShareStatus(null), 1800)
   }
 
-  // ── Derived state ───────────────────────────────────────────────────────────
-  const hasErrors  = diagnostics.length > 0
-  const isClean    = !isEmpty && !hasErrors && !isChecking
-  const errorCount = diagnostics.length
-  const isRemote   = REMOTE_LANGUAGES.includes(language)
-  // Show explicit "checking remotely" state only for languages that
-  // actually go to the network — for fast local checks, the in-flight
-  // window is too short to bother surfacing.
-  const showRemoteLoading = isChecking && isRemote && !isEmpty
+  const handleJumpTo = useCallback(
+    (line, col) => editorRef.current?.jumpTo(line, col),
+    []
+  )
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="app">
+      <TopBar
+        language={language}
+        onLanguageChange={handleLanguageChange}
+        errorCount={errorCount}
+        isDark={isDark}
+        onToggleTheme={() => setIsDark(d => !d)}
+        onRunCheck={handleRunCheck}
+      />
 
-      {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="topbar">
-        <div className="wordmark">
-          <span className="wordmark-primary">Syntax</span>
-          <span className="wordmark-secondary">Inspector</span>
-        </div>
-
-        <div className="topbar-center">
-          <select
-            className="lang-select"
-            value={language}
-            onChange={e => handleLanguageChange(e.target.value)}
-            aria-label="Select language"
-          >
-            {LANGUAGES.map(l => (
-              <option key={l.id} value={l.id}>{l.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="topbar-right">
-          {errorCount > 0 && (
-            <span className="error-badge" aria-label={`${errorCount} error${errorCount > 1 ? 's' : ''}`}>
-              {errorCount}
-            </span>
-          )}
-          <button
-            className="theme-toggle"
-            onClick={() => setIsDark(d => !d)}
-            aria-label="Toggle theme"
-            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {isDark ? '☀' : '◑'}
-          </button>
-          <button className="run-btn" onClick={handleRunCheck}>
-            Run check <kbd>⌘↵</kbd>
-          </button>
-        </div>
-      </header>
-
-      {/* ── Main two-pane area ──────────────────────────────────────── */}
       <main className="workspace">
-
-        {/* Left: editor pane */}
-        <div className="pane pane-input">
-          <div className="pane-label">Input</div>
-
-          <div className="editor-wrap" ref={editorDomRef} />
-
-          <div className="pane-actions">
-            <button className="action-btn" onClick={handlePaste}>Paste</button>
-            <button className="action-btn" onClick={handleClear}>Clear</button>
-            <button className="action-btn" onClick={handleCopy}>Copy</button>
-            <label className="action-btn upload-label">
-              Upload
-              <input
-                type="file"
-                accept=".js,.jsx,.ts,.tsx,.py,.cpp,.cc,.cxx,.hpp,.h,.c,.java,.rb,.json,.html,.htm,.css,.sql,.yaml,.yml"
-                onChange={handleUpload}
-                hidden
-              />
-            </label>
-            <button className="action-btn" onClick={handleShare} disabled={isEmpty}>
-              {shareStatus ?? 'Share'}
-            </button>
-            <button className="action-btn sample-btn" onClick={handleSample}>
-              Try sample
-            </button>
-          </div>
-        </div>
+        <EditorPane
+          editorRef={editorDomRef}
+          onPaste={handlePaste}
+          onCopy={handleCopy}
+          onClear={handleClear}
+          onUpload={handleUpload}
+          onShare={handleShare}
+          onSample={handleSample}
+          shareStatus={shareStatus}
+          isEmpty={isEmpty}
+        />
 
         <div className="pane-divider" />
 
-        {/* Right: diagnostics pane */}
-        <div className="pane pane-results">
-          <div className="pane-label">
-            Diagnostics
-            {errorCount > 0 && <span className="diag-count">{errorCount} issue{errorCount > 1 ? 's' : ''}</span>}
-          </div>
-
-          <div className="results-scroll" role="region" aria-live="polite" aria-atomic="false">
-            {isEmpty ? (
-              <div className="empty-state">
-                <p className="empty-heading">Ready to inspect.</p>
-                <p className="empty-sub">
-                  Paste code, upload a file, or hit <strong>Try sample</strong> to see errors surface inline.
-                </p>
-              </div>
-            ) : showRemoteLoading ? (
-              <div className="loading-state" role="status">
-                <div className="loading-pulse" aria-hidden="true">
-                  <span /><span /><span />
-                </div>
-                <p className="loading-heading">Checking with the {language === 'cpp' ? 'C++' : language[0].toUpperCase() + language.slice(1)} compiler…</p>
-                <p className="loading-sub">
-                  First check after idle takes about 30 seconds — the syntax server is waking up.
-                </p>
-              </div>
-            ) : isClean ? (
-              <div className="clean-state">
-                <span className="clean-icon">✓</span>
-                <p className="clean-heading">No syntax errors found</p>
-                <p className="clean-sub">{language.charAt(0).toUpperCase() + language.slice(1)} — looks good.</p>
-              </div>
-            ) : (
-              <div className="error-list">
-                {diagnostics.map((d, i) => (
-                  <ErrorCard
-                    key={`${d.line}-${d.column}-${i}`}
-                    index={i}
-                    diagnostic={d}
-                    code={codeRef.current}
-                    onJumpTo={(line, col) => editorRef.current?.jumpTo(line, col)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
+        <ResultsPane
+          language={language}
+          diagnostics={diagnostics}
+          isEmpty={isEmpty}
+          isClean={isClean}
+          showRemoteLoading={showRemoteLoading}
+          onJumpTo={handleJumpTo}
+          onSample={handleSample}
+          codeRef={codeRef}
+        />
       </main>
 
-      {/* ── Footer credit ─────────────────────────────────────────── */}
-      <footer className="footer">
-        <span className="footer-mark">
-          Crafted by <strong>Naram Alawar</strong>
-        </span>
-        <a
-          className="footer-link"
-          href="https://github.com/Visaug36"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Naram's GitHub profile"
-        >
-          @Visaug36 <span className="footer-arrow">↗</span>
-        </a>
-      </footer>
+      <Footer />
     </div>
   )
 }

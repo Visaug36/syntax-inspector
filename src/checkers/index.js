@@ -1,12 +1,31 @@
-import { check as checkJs   } from './javascript.js'
-import { check as checkTs   } from './typescript.js'
-import { check as checkPy   } from './python.js'
-import { check as checkJson } from './json.js'
-import { check as checkHtml } from './html.js'
-import { check as checkCss  } from './css.js'
-import { check as checkSql  } from './sql.js'
-import { check as checkYaml } from './yaml.js'
+// Each checker module is loaded lazily — picking JSON shouldn't pull in
+// @babel/parser (~2MB) or css-tree (~500KB). Vite splits these into
+// per-checker chunks at build time. After the first load they're cached
+// in `loadedCheckers` so subsequent calls are sync-fast.
 import { checkRemote, REMOTE_LANGUAGES } from './_remote.js'
+import { SAMPLES } from './samples.js'
+
+const LOADERS = {
+  javascript: () => import('./javascript.js'),
+  typescript: () => import('./typescript.js'),
+  python:     () => import('./python.js'),
+  json:       () => import('./json.js'),
+  html:       () => import('./html.js'),
+  css:        () => import('./css.js'),
+  sql:        () => import('./sql.js'),
+  yaml:       () => import('./yaml.js'),
+}
+
+const loadedCheckers = new Map()
+
+async function loadChecker(lang) {
+  if (loadedCheckers.has(lang)) return loadedCheckers.get(lang)
+  const loader = LOADERS[lang]
+  if (!loader) return null
+  const mod = await loader()
+  loadedCheckers.set(lang, mod.check)
+  return mod.check
+}
 
 export const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', ext: '.js' },
@@ -22,25 +41,15 @@ export const LANGUAGES = [
   { id: 'yaml',       label: 'YAML',       ext: '.yaml' },
 ]
 
-const CHECKERS = {
-  javascript: checkJs,
-  typescript: checkTs,
-  python:     checkPy,
-  json:       checkJson,
-  html:       checkHtml,
-  css:        checkCss,
-  sql:        checkSql,
-  yaml:       checkYaml,
-}
-
-// Sync wrapper used by App.jsx — returns either Diagnostic[] or a Promise
-// (for languages that need the backend). The caller awaits as needed.
-export function checkCode(code, language) {
+// Always async now — caller awaits. Local checkers resolve in a microtask
+// after first load, remote ones hit the network.
+export async function checkCode(code, language) {
   if (REMOTE_LANGUAGES.includes(language)) return checkRemote(language, code)
-  return CHECKERS[language]?.(code) ?? []
+  const checker = await loadChecker(language)
+  return checker?.(code) ?? []
 }
 
-export { REMOTE_LANGUAGES }
+export { REMOTE_LANGUAGES, SAMPLES }
 
 /** Guess language from file extension or code content heuristics */
 export function detectLanguage(filename, code = '') {
@@ -73,131 +82,4 @@ export function detectLanguage(filename, code = '') {
   if (/^---\s*$|^\w[\w-]*:\s/m.test(c)) return 'yaml'
   if (/:\s*(string|number|boolean|any)\b|interface\s+\w+|type\s+\w+\s*=/m.test(c)) return 'typescript'
   return 'javascript'
-}
-
-export const SAMPLES = {
-  javascript: `// Three distinct errors — all surface at once
-function fetchUser(id) {
-  const user = {
-    id: id,
-    name: "Alice
-  }
-  return user
-}
-
-const double = x => x ** ;
-
-class Widget {
-  constructor(name)
-    this.name = name
-  }
-}`,
-
-  typescript: `// Multiple TS errors in one pass
-interface Config {
-  host: string
-  port: number,,
-}
-
-function connect(config: Config {
-  console.log(\`Connecting to \${config.host}\`)
-}
-
-const enabled: boolean = "yes"
-const items: number[] = [1, 2, , 3,]`,
-
-  python: `# Unclosed bracket in list comprehension
-def calculate(items):
-    prices = [item['price'
-               for item in items]
-    return sum(prices)
-
-result = calculate([
-    {'price': 10},
-    {'price': 20},
-])`,
-
-  json: `{
-  "user": {
-    "name": "Alice",
-    "age": 30,
-    "roles": ["admin", "editor",],
-    "active": true
-  }
-}`,
-
-  html: `<!DOCTYPE html>
-<html>
-  <head>
-    <title>My Page</title>
-  </head>
-  <body>
-    <div class="container">
-      <h1>Hello <strong>World</h2>
-    </div>
-  </body>
-</html>`,
-
-  css: `.container {
-  background: #fff;
-  padding: 20px
-  border-radius: 8px;
-}
-
-.broken {
-  color: red;
-  margin: ;
-}`,
-
-  sql: `SELECT
-  u.id,
-  u.name,
-  COUNT(o.id) AS order_count
-FROM users u
-LEFT JOIN orders o ON u.id = o.user_id
-WHERE u.status = 'active'
-GROUP u.id
-HAVING order_count > 0`,
-
-  yaml: `name: my-app
-version: 1.0.0
-database:
-  host: localhost
-  port: 5432
-tags:
-  - web
-  - api
-config:
-  debug: true
-  log_level: [info
-  max_connections: 10`,
-
-  cpp: `// Three real bugs g++ will catch
-#include <iostream>
-
-int main() {
-    int x = 5
-    std::cout << y << std::endl;
-    return 0
-}`,
-
-  java: `// javac will report each error with rich messages
-public class Main {
-    public static void main(String[] args) {
-        int count = 5
-        System.out.println("Count: " + count)
-        if (count > 0)
-            System.out.println("positive"
-    }
-}`,
-
-  ruby: `# ruby -c catches each parse error
-def greet(name)
-  puts "Hello, #{name}"
-  if name.length > 0
-    puts "welcome"
-
-end
-
-greet("world"`,
 }

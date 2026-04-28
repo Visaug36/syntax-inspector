@@ -1,10 +1,18 @@
 // Backend-driven syntax checking for compiled languages (C++, Java, Ruby)
 // where browser-only parsers can't match real compiler error messages.
 //
-// VITE_SANDBOX_URL points at a deployed code-sandbox instance exposing /check.
-// In dev (no env var) we hit localhost:4000 so `npm start` in code-sandbox
-// powers local development without changes.
-const BASE_URL = import.meta.env.VITE_SANDBOX_URL || 'http://localhost:4000'
+// Resolution order:
+//   1. ?backend=<url> URL param   — runtime override, useful for QA / forks
+//   2. VITE_SANDBOX_URL build env — baked into production bundle by CI
+//   3. localhost:4000              — dev default (matches code-sandbox `npm start`)
+function resolveBaseUrl() {
+  if (typeof window !== 'undefined') {
+    const fromQuery = new URLSearchParams(window.location.search).get('backend')
+    if (fromQuery) return fromQuery.replace(/\/$/, '')
+  }
+  return (import.meta.env.VITE_SANDBOX_URL || 'http://localhost:4000').replace(/\/$/, '')
+}
+const BASE_URL = resolveBaseUrl()
 
 const cache = new Map() // code → diagnostics, capped to ~64 entries
 

@@ -21,33 +21,34 @@ import {
 } from '@codemirror/language'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { lintGutter, setDiagnostics as cmSetDiagnostics } from '@codemirror/lint'
-import { javascript } from '@codemirror/lang-javascript'
-import { python } from '@codemirror/lang-python'
-import { json } from '@codemirror/lang-json'
-import { html } from '@codemirror/lang-html'
-import { css } from '@codemirror/lang-css'
-import { sql } from '@codemirror/lang-sql'
-import { yaml } from '@codemirror/lang-yaml'
-import { java } from '@codemirror/lang-java'
-import { cpp } from '@codemirror/lang-cpp'
+// CodeMirror language packs are lazy-loaded — picking JSON shouldn't pull
+// in @codemirror/lang-cpp (50KB+) or the legacy-modes Ruby grammar.
+// Vite splits each into its own chunk; first load awaits the import,
+// later switches reuse the cached extension via langCache.
 import { StreamLanguage } from '@codemirror/language'
-import { ruby } from '@codemirror/legacy-modes/mode/ruby'
 
-export function getLangExtension(lang) {
-  switch (lang) {
-    case 'javascript': return javascript({ jsx: true })
-    case 'typescript': return javascript({ typescript: true, jsx: true })
-    case 'python':     return python()
-    case 'json':       return json()
-    case 'html':       return html()
-    case 'css':        return css()
-    case 'sql':        return sql()
-    case 'yaml':       return yaml()
-    case 'java':       return java()
-    case 'cpp':        return cpp()
-    case 'ruby':       return StreamLanguage.define(ruby)
-    default:           return javascript({ jsx: true })
-  }
+const LANG_LOADERS = {
+  javascript: () => import('@codemirror/lang-javascript').then(m => m.javascript({ jsx: true })),
+  typescript: () => import('@codemirror/lang-javascript').then(m => m.javascript({ typescript: true, jsx: true })),
+  python:     () => import('@codemirror/lang-python').then(m => m.python()),
+  json:       () => import('@codemirror/lang-json').then(m => m.json()),
+  html:       () => import('@codemirror/lang-html').then(m => m.html()),
+  css:        () => import('@codemirror/lang-css').then(m => m.css()),
+  sql:        () => import('@codemirror/lang-sql').then(m => m.sql()),
+  yaml:       () => import('@codemirror/lang-yaml').then(m => m.yaml()),
+  java:       () => import('@codemirror/lang-java').then(m => m.java()),
+  cpp:        () => import('@codemirror/lang-cpp').then(m => m.cpp()),
+  ruby:       () => import('@codemirror/legacy-modes/mode/ruby').then(m => StreamLanguage.define(m.ruby)),
+}
+
+const langCache = new Map()
+
+export async function getLangExtension(lang) {
+  if (langCache.has(lang)) return langCache.get(lang)
+  const loader = LANG_LOADERS[lang] ?? LANG_LOADERS.javascript
+  const ext    = await loader()
+  langCache.set(lang, ext)
+  return ext
 }
 
 function lineColToPos(doc, line, col) {
@@ -80,7 +81,10 @@ export function createEditor(parent, { onChange, initialCode = '' } = {}) {
         indentWithTab,
       ]),
       lintGutter(),
-      langCompartment.of(javascript({ jsx: true })),
+      // Empty initial language extension — getLangExtension is async and
+      // we don't want to block editor creation. setLanguage(initialLang)
+      // is called by App right after mount.
+      langCompartment.of([]),
       themeCompartment.of([]),
       EditorView.updateListener.of(update => {
         if (update.docChanged && onChange) {
@@ -110,9 +114,12 @@ export function createEditor(parent, { onChange, initialCode = '' } = {}) {
   return {
     view,
 
-    setLanguage(lang) {
+    async setLanguage(lang) {
+      const ext = await getLangExtension(lang)
+      // Editor may have been destroyed while we awaited
+      if (view.contentDOM.isConnected === false) return
       view.dispatch({
-        effects: langCompartment.reconfigure(getLangExtension(lang)),
+        effects: langCompartment.reconfigure(ext),
       })
     },
 

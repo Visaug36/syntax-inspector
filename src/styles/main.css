@@ -484,12 +484,75 @@ body::before {
   font-weight: 300;
   color: var(--ink-soft);
   line-height: 1.7;
+  margin-bottom: 22px;
 }
 .empty-sub strong {
   color: var(--accent);
   font-weight: 400;
   font-style: italic;
   font-family: var(--font-serif);
+}
+
+/* CTA — primary call to action, points users at the obvious starting move */
+.empty-actions {
+  margin-bottom: 28px;
+}
+.empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 3px;
+  letter-spacing: 0.01em;
+  transition: all 200ms var(--ease);
+}
+.empty-cta:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: var(--accent);
+}
+.empty-cta-arrow {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  transition: transform 200ms var(--ease);
+}
+.empty-cta:hover .empty-cta-arrow { transform: translateX(3px); }
+.empty-cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Tips list — quiet, monospace, hairline separators */
+.empty-tips {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--rule-soft);
+  padding-top: 18px;
+  max-width: 320px;
+}
+.empty-tips li {
+  font-size: 11px;
+  font-family: var(--font-sans);
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+.empty-tips kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin: 0 1px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-soft);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
 }
 
 /* ── Loading state (remote checks during cold start) ────────────────────── */
