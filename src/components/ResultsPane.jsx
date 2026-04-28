@@ -13,7 +13,8 @@ export default function ResultsPane({
   return (
     <div className="pane pane-results">
       <div className="pane-label">
-        Diagnostics
+        <span className="pane-label-text">Diagnostics</span>
+        <span className="pane-label-rule" aria-hidden="true" />
         {errorCount > 0 && (
           <span className="diag-count">{errorCount} issue{errorCount > 1 ? 's' : ''}</span>
         )}
