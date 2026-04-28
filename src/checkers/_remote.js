@@ -52,4 +52,7 @@ export async function checkRemote(language, code) {
   }
 }
 
-export const REMOTE_LANGUAGES = ['cpp', 'java', 'ruby']
+// Python now goes through the backend's real `compile()` parser — the
+// previous heuristic checker missed many real syntax errors (else without
+// if, await outside async, identifiers starting with digits, etc.).
+export const REMOTE_LANGUAGES = ['cpp', 'java', 'ruby', 'python']

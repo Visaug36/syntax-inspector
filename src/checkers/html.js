@@ -124,12 +124,18 @@ export function check(code) {
     }
 
     // ── Opening tag <name …> or <name …/> ──────────────────────────────
-    const m = code.slice(i).match(/^<([a-zA-Z][\w-]*)((?:\s+[^>]*)?)(\/?)>/)
+    // The previous regex `((?:\s+[^>]*)?)(\/?)>` had a greedy `[^>]*`
+    // that ate the trailing `/`, so `<svg/>` and `<my-icon name="x"/>`
+    // were treated as opening (never-closed) tags. Now we capture the
+    // attributes liberally and detect the trailing `/` by inspecting
+    // the captured attrs after matching.
+    const m = code.slice(i).match(/^<([a-zA-Z][\w-]*)((?:\s+[^>]*?)?)\s*>/)
     if (!m) { i++; continue } // stray <, treat as text
 
-    const name         = m[1].toLowerCase()
-    const selfClosing  = m[3] === '/'
-    const isVoid       = VOID_ELEMENTS.has(name)
+    const name        = m[1].toLowerCase()
+    const attrs       = m[2]
+    const selfClosing = attrs.trimEnd().endsWith('/')
+    const isVoid      = VOID_ELEMENTS.has(name)
 
     // Auto-close previous siblings the spec lets us elide. <li>a<li>b is
     // valid: the second <li> closes the first.

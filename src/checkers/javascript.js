@@ -50,7 +50,95 @@ export function runCheck(code, plugins, type) {
     }
   }
 
+  // Defense in depth: Babel occasionally accepts unbalanced brackets in
+  // errorRecovery mode (esp. inside template literals or regex). If the
+  // checker came up clean but a hand-rolled bracket scan disagrees, surface
+  // the imbalance so students see it.
+  if (errors.length === 0) {
+    const imbalance = scanBracketBalance(code)
+    if (imbalance) errors.push(imbalance)
+  }
+
   return dedupeExact(errors)
+}
+
+// String/comment/template/regex aware bracket-balance scan. Used only as a
+// fallback — Babel handles the common case correctly.
+function scanBracketBalance(code) {
+  const stack = []
+  const opener = { ')': '(', ']': '[', '}': '{' }
+  const opens  = { '(': ')', '[': ']', '{': '}' }
+  let line = 1, col = 0
+  let mode = 'code' // code | str-double | str-single | str-template | comment-line | comment-block | regex
+  let templateDepth = 0 // nested ${...} inside template literals
+
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i]
+    const n = code[i + 1] ?? ''
+    if (c === '\n') { line++; col = 0; continue }
+    col++
+
+    if (mode === 'comment-line') { if (c === '\n') mode = 'code'; continue }
+    if (mode === 'comment-block') {
+      if (c === '*' && n === '/') { mode = 'code'; i++; col++ }
+      continue
+    }
+    if (mode === 'str-double') {
+      if (c === '\\') { i++; col++; continue }
+      if (c === '"')  mode = 'code'
+      continue
+    }
+    if (mode === 'str-single') {
+      if (c === '\\') { i++; col++; continue }
+      if (c === "'")  mode = 'code'
+      continue
+    }
+    if (mode === 'str-template') {
+      if (c === '\\') { i++; col++; continue }
+      if (c === '`')  mode = 'code'
+      else if (c === '$' && n === '{') { mode = 'code'; templateDepth++; stack.push({ ch: '{', line, col, fromTemplate: true }); i++; col++ }
+      continue
+    }
+    if (mode === 'regex') {
+      if (c === '\\') { i++; col++; continue }
+      if (c === '/')  mode = 'code'
+      continue
+    }
+
+    // mode === 'code'
+    if (c === '/' && n === '/') { mode = 'comment-line'; i++; col++; continue }
+    if (c === '/' && n === '*') { mode = 'comment-block'; i++; col++; continue }
+    if (c === '"')  { mode = 'str-double'; continue }
+    if (c === "'")  { mode = 'str-single'; continue }
+    if (c === '`')  { mode = 'str-template'; continue }
+
+    if (opens[c]) {
+      stack.push({ ch: c, line, col: col - 1 })
+    } else if (opener[c]) {
+      const top = stack.pop()
+      if (!top || top.ch !== opener[c]) {
+        return {
+          line, column: col - 1, severity: 'error',
+          message: `Unexpected '${c}' — no matching '${opener[c]}'`,
+          type: 'Syntax',
+        }
+      }
+      if (c === '}' && top.fromTemplate) {
+        templateDepth--
+        mode = 'str-template'
+      }
+    }
+  }
+
+  if (stack.length) {
+    const t = stack[0]
+    return {
+      line: t.line, column: t.col, severity: 'error',
+      message: `'${t.ch}' was never closed`,
+      type: 'Syntax',
+    }
+  }
+  return null
 }
 
 // Babel surfaces a few binding/scope errors via errorRecovery that aren't

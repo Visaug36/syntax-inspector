@@ -39,13 +39,16 @@ export default function App() {
   const codeRef      = useRef('')
   const languageRef  = useRef(language)
 
-  const { diagnostics, isChecking, run, debounce, reset } = useChecker()
+  const { diagnostics, isChecking, isSlow, run, debounce, reset } = useChecker()
 
   // ── Derived state ────────────────────────────────────────────────────────
-  const errorCount        = diagnostics.length
-  const hasErrors         = errorCount > 0
-  const isClean           = !isEmpty && !hasErrors && !isChecking
-  const showRemoteLoading = isChecking && REMOTE_LANGUAGES.includes(language) && !isEmpty
+  const errorCount  = diagnostics.length
+  const hasErrors   = errorCount > 0
+  const isClean     = !isEmpty && !hasErrors && !isChecking
+  // Show the loading screen any time a check has been running >200ms.
+  // Remote languages get richer copy explaining the cold start.
+  const isRemoteLang = REMOTE_LANGUAGES.includes(language)
+  const showLoading  = isSlow && !isEmpty
 
   // ── Sync diagnostics into the editor's lint gutter ──────────────────────
   useEffect(() => {
@@ -179,7 +182,8 @@ export default function App() {
           diagnostics={diagnostics}
           isEmpty={isEmpty}
           isClean={isClean}
-          showRemoteLoading={showRemoteLoading}
+          showLoading={showLoading}
+          isRemote={isRemoteLang}
           onJumpTo={handleJumpTo}
           onSample={handleSample}
           codeRef={codeRef}

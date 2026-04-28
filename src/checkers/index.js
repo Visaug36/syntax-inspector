@@ -8,12 +8,12 @@ import { SAMPLES } from './samples.js'
 const LOADERS = {
   javascript: () => import('./javascript.js'),
   typescript: () => import('./typescript.js'),
-  python:     () => import('./python.js'),
   json:       () => import('./json.js'),
   html:       () => import('./html.js'),
   css:        () => import('./css.js'),
   sql:        () => import('./sql.js'),
   yaml:       () => import('./yaml.js'),
+  // python intentionally absent — handled by checkRemote → /check on backend
 }
 
 const loadedCheckers = new Map()
@@ -30,7 +30,7 @@ async function loadChecker(lang) {
 export const LANGUAGES = [
   { id: 'javascript', label: 'JavaScript', ext: '.js' },
   { id: 'typescript', label: 'TypeScript', ext: '.ts' },
-  { id: 'python',     label: 'Python',     ext: '.py' },
+  { id: 'python',     label: 'Python',     ext: '.py', remote: true },
   { id: 'cpp',        label: 'C++',        ext: '.cpp', remote: true },
   { id: 'java',       label: 'Java',       ext: '.java', remote: true },
   { id: 'ruby',       label: 'Ruby',       ext: '.rb', remote: true },

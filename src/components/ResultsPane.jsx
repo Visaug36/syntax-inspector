@@ -3,7 +3,7 @@ import ErrorCard from './ErrorCard.jsx'
 export default function ResultsPane({
   language,
   diagnostics,
-  isEmpty, isClean, showRemoteLoading,
+  isEmpty, isClean, showLoading, isRemote,
   onJumpTo, onSample,
   codeRef,
 }) {
@@ -28,8 +28,8 @@ export default function ResultsPane({
       >
         {isEmpty ? (
           <EmptyState langLabel={langLabel} onSample={onSample} />
-        ) : showRemoteLoading ? (
-          <LoadingState langLabel={langLabel} />
+        ) : showLoading ? (
+          <LoadingState langLabel={langLabel} isRemote={isRemote} />
         ) : isClean ? (
           <CleanState langLabel={langLabel} />
         ) : (
@@ -71,16 +71,20 @@ function EmptyState({ langLabel, onSample }) {
   )
 }
 
-function LoadingState({ langLabel }) {
+function LoadingState({ langLabel, isRemote }) {
   return (
     <div className="loading-state" role="status">
       <div className="loading-pulse" aria-hidden="true">
         <span /><span /><span />
       </div>
-      <p className="loading-heading">Checking with the {langLabel} compiler…</p>
-      <p className="loading-sub">
-        First check after idle takes about 30 seconds — the syntax server is waking up.
+      <p className="loading-heading">
+        {isRemote ? `Checking with the ${langLabel} compiler…` : `Checking ${langLabel}…`}
       </p>
+      {isRemote && (
+        <p className="loading-sub">
+          First check after idle takes about 30 seconds — the syntax server is waking up.
+        </p>
+      )}
     </div>
   )
 }
