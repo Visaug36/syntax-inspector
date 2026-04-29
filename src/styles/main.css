@@ -394,6 +394,26 @@ body::before {
   font-feature-settings: "onum";
 }
 
+/* Quiet copy-report link, only shown when there are errors. Lives at the
+   far right of the pane label, mirroring the action-link aesthetic. */
+.diag-export {
+  margin-left: 8px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 3px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 160ms var(--ease);
+}
+.diag-export:hover { color: var(--accent); border-color: var(--rule); }
+.diag-export:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* ── Editor ──────────────────────────────────────────────────────────────── */
 
 .editor-wrap {

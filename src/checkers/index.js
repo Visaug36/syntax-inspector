@@ -1,11 +1,53 @@
-// Each checker module is loaded lazily — picking JSON shouldn't pull in
-// @babel/parser (~2MB) or css-tree (~500KB). Vite splits these into
-// per-checker chunks at build time. After the first load they're cached
-// in `loadedCheckers` so subsequent calls are sync-fast.
+// Checker dispatch + worker bridge.
+//
+// Local-language checks run inside a single Web Worker so the heaviest
+// parser (Babel, ~80KB gzip + non-trivial CPU) doesn't block the main
+// thread. Remote languages (Python, C++, Java, Ruby) bypass the worker
+// and hit the backend.
+//
+// The worker is created lazily — the first checkCode call triggers
+// worker init, so users who never edit code never pay the worker cost.
 import { checkRemote, REMOTE_LANGUAGES } from './_remote.js'
 import { SAMPLES } from './samples.js'
 
-const LOADERS = {
+// Vite's `?worker` import emits a separate worker bundle and gives us a
+// Worker constructor with the URL + module type pre-baked. The dynamic
+// import means the worker chunk only downloads when checkLocally is
+// first called.
+let workerPromise = null
+let worker = null
+let nextId = 1
+const pending = new Map()
+
+async function getWorker() {
+  if (worker) return worker
+  if (typeof Worker === 'undefined') return null  // Node tests, etc.
+  if (!workerPromise) {
+    workerPromise = import('./_worker.js?worker').then((m) => {
+      const w = new m.default()
+      w.addEventListener('message', (event) => {
+        const { id, diagnostics } = event.data
+        const resolver = pending.get(id)
+        if (resolver) {
+          pending.delete(id)
+          resolver(diagnostics)
+        }
+      })
+      w.addEventListener('error', () => {
+        // Worker crashed — drop the singleton so next call tries again
+        worker = null
+        workerPromise = null
+      })
+      worker = w
+      return w
+    }).catch(() => null)
+  }
+  return workerPromise
+}
+
+// Synchronous fallback loaders — used when the worker isn't available
+// (Node tests, old browsers, etc.). Same import map as the worker.
+const FALLBACK_LOADERS = {
   javascript: () => import('./javascript.js'),
   typescript: () => import('./typescript.js'),
   json:       () => import('./json.js'),
@@ -13,18 +55,29 @@ const LOADERS = {
   css:        () => import('./css.js'),
   sql:        () => import('./sql.js'),
   yaml:       () => import('./yaml.js'),
-  // python intentionally absent — handled by checkRemote → /check on backend
 }
+const fallbackCache = new Map()
 
-const loadedCheckers = new Map()
-
-async function loadChecker(lang) {
-  if (loadedCheckers.has(lang)) return loadedCheckers.get(lang)
-  const loader = LOADERS[lang]
-  if (!loader) return null
-  const mod = await loader()
-  loadedCheckers.set(lang, mod.check)
-  return mod.check
+async function checkLocally(language, code) {
+  const w = await getWorker()
+  if (w) {
+    return new Promise((resolve) => {
+      const id = nextId++
+      pending.set(id, resolve)
+      w.postMessage({ id, language, code })
+    })
+  }
+  // Fallback path: main-thread import + cache (used in test envs and any
+  // browser where Worker creation failed)
+  let checker = fallbackCache.get(language)
+  if (!checker) {
+    const loader = FALLBACK_LOADERS[language]
+    if (!loader) return []
+    const mod = await loader()
+    checker = mod.check
+    fallbackCache.set(language, checker)
+  }
+  return checker(code) ?? []
 }
 
 export const LANGUAGES = [
@@ -41,12 +94,9 @@ export const LANGUAGES = [
   { id: 'yaml',       label: 'YAML',       ext: '.yaml' },
 ]
 
-// Always async now — caller awaits. Local checkers resolve in a microtask
-// after first load, remote ones hit the network.
 export async function checkCode(code, language) {
   if (REMOTE_LANGUAGES.includes(language)) return checkRemote(language, code)
-  const checker = await loadChecker(language)
-  return checker?.(code) ?? []
+  return checkLocally(language, code)
 }
 
 export { REMOTE_LANGUAGES, SAMPLES }

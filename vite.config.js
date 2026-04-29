@@ -9,6 +9,9 @@ const isProd = process.env.NODE_ENV === 'production' || process.env.GITHUB_ACTIO
 export default defineConfig({
   base: isProd ? '/syntax-inspector/' : '/',
   plugins: [react()],
+  // ES-module workers so the worker can lazy-import language checkers via
+  // dynamic import(). IIFE (Vite's default) doesn't support code splitting.
+  worker: { format: 'es' },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     global: 'globalThis',

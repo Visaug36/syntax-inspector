@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import ErrorCard from './ErrorCard.jsx'
+import { buildMarkdownReport, downloadText } from '../lib/exportReport.js'
 
 export default function ResultsPane({
   language,
@@ -9,6 +11,20 @@ export default function ResultsPane({
 }) {
   const errorCount = diagnostics.length
   const langLabel  = language === 'cpp' ? 'C++' : language[0].toUpperCase() + language.slice(1)
+  const [exportStatus, setExportStatus] = useState(null)
+
+  const handleExport = async () => {
+    const md = buildMarkdownReport({ language, code: codeRef.current, diagnostics })
+    // Prefer clipboard for one-click paste; fall back to file download.
+    try {
+      await navigator.clipboard.writeText(md)
+      setExportStatus('Copied to clipboard')
+    } catch {
+      downloadText(`syntax-inspector-${language}-${Date.now()}.md`, md)
+      setExportStatus('Downloaded')
+    }
+    setTimeout(() => setExportStatus(null), 1800)
+  }
 
   return (
     <div className="pane pane-results">
@@ -16,7 +32,17 @@ export default function ResultsPane({
         <span className="pane-label-text">Diagnostics</span>
         <span className="pane-label-rule" aria-hidden="true" />
         {errorCount > 0 && (
-          <span className="diag-count">{errorCount} issue{errorCount > 1 ? 's' : ''}</span>
+          <>
+            <span className="diag-count">{errorCount} issue{errorCount > 1 ? 's' : ''}</span>
+            <button
+              className="diag-export"
+              onClick={handleExport}
+              aria-label="Copy diagnostic report"
+              title="Copy a markdown report of all errors"
+            >
+              {exportStatus ?? 'Copy report'}
+            </button>
+          </>
         )}
       </div>
 

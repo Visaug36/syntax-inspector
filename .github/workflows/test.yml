@@ -1,0 +1,21 @@
+# Run the Vitest suite on every push and pull request. Acts as a regression
+# gate: deploys won't run until tests pass on main (see deploy.yml needs).
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  vitest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test

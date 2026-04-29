@@ -31,6 +31,9 @@ jobs:
 
       - run: npm ci
 
+      # Test gate — deploy refuses to ship if any check is broken.
+      - run: npm test
+
       - run: npm run build
         env:
           NODE_ENV: production
