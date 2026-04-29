@@ -21,9 +21,11 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // node-sql-parser references path in some code paths; stub it for browser
-      path: false,
-      fs: false,
+      // node-sql-parser and a few other deps reference Node-only modules
+      // (path, fs) in code paths the browser never reaches. Point to an
+      // empty stub so the bundler doesn't try to resolve them.
+      path: new URL('./src/_empty-stub.js', import.meta.url).pathname,
+      fs:   new URL('./src/_empty-stub.js', import.meta.url).pathname,
     },
   },
 })

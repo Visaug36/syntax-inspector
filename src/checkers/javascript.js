@@ -45,7 +45,12 @@ export function runCheck(code, plugins, type) {
       if (key === lastKey) break // no progress → bail
       lastKey = key
       errors.push(diag)
-      working = maskLine(working, diag.line)
+      // First try masking ONLY the offending span — that lets the parser
+      // potentially find another error later on the same line. Falls back
+      // to whole-line masking when the span attempt makes no progress on
+      // the next iteration (handled by the `key === lastKey` check above).
+      const spanMasked = maskSpan(working, diag.line, diag.column)
+      working = spanMasked ?? maskLine(working, diag.line)
       if (working === null) break
     }
   }
@@ -156,6 +161,30 @@ function maskLine(code, lineNum) {
   const lines = code.split('\n')
   if (lineNum < 1 || lineNum > lines.length) return null
   lines[lineNum - 1] = ' '.repeat(lines[lineNum - 1].length)
+  return lines.join('\n')
+}
+
+// Mask only the offending token's span instead of blanking the whole line.
+// Lets the parser still see code BEFORE and AFTER the bad token, so a
+// second distinct error on the same line can surface in the next iteration.
+//
+// Span heuristic: from the error column to the next whitespace, semicolon,
+// or closing bracket. Never crosses a newline. Returns null if the span
+// would be empty (caller falls back to maskLine to guarantee progress).
+function maskSpan(code, lineNum, col) {
+  const lines = code.split('\n')
+  if (lineNum < 1 || lineNum > lines.length) return null
+  const line = lines[lineNum - 1]
+  if (col < 0 || col >= line.length) return null
+
+  // Find the end of the bad token. Stop at the first whitespace,
+  // statement-end, or closing bracket — whichever comes first.
+  let end = col
+  while (end < line.length && !/[\s;)\]}]/.test(line[end])) end++
+  if (end === col) end = col + 1
+  if (end - col >= line.length - col) return null  // would mask whole line; let caller fall back
+
+  lines[lineNum - 1] = line.slice(0, col) + ' '.repeat(end - col) + line.slice(end)
   return lines.join('\n')
 }
 

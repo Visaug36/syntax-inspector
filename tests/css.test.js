@@ -32,6 +32,9 @@ describe('CSS checker', () => {
         ['unclosed brace',               '.x { color: red',                /never closed/i],
         ['extra closing brace',          '.x { color: red; } }',           null],
         ['unclosed comment',             '/* never ends .x { color: red; }', /comment was never closed/i],
+        // lightningcss should now catch real errors INSIDE modern syntax
+        ['broken nesting selector',      '.parent { & ... { color: red; } }', null],
+        ['malformed @container',         '@container (broken syntax { .x { color: red } }', null],
       ],
     })
   })

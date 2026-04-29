@@ -1,41 +1,101 @@
 import * as csstree from 'css-tree'
 
-// css-tree's parser is forgiving — it auto-closes braces and silently
-// recovers from many malformed declarations. To catch real structural
-// bugs we layer a hand-rolled balance check on top.
+// Two-tier CSS checker:
 //
-// css-tree also doesn't know modern CSS (Nesting, @container, @layer,
-// @scope, @starting-style, etc.) and emits noisy errors on those. When
-// we detect those features we suppress css-tree's diagnostics and rely
-// on the brace-balance check alone.
+//   1. css-tree (light, ~170 KB chunk) handles classic CSS — fast, well-
+//      tested, decent error messages. It's our default path.
+//
+//   2. lightningcss-wasm (~500 KB chunk + WASM) handles modern syntax
+//      css-tree doesn't know: @container, @layer, @scope, @starting-style,
+//      native CSS Nesting (& {…}), :has(), etc. Only loaded the first time
+//      a CSS file uses one of these — users writing 2010-era CSS never pay
+//      for it.
+//
+// On top of both we run a hand-rolled brace + comment balance pass — both
+// parsers tend to auto-recover where students would expect a real error
+// (e.g. `/* comment` with no `*/`).
 const MODERN_AT_RULES = /@(container|layer|scope|starting-style|property|when)\b/
+const NESTING_HINT    = /^\s*&|^\s*[.#][\w-]+\s*\{[^}]*[.#]/m
 
-export function check(code) {
+let lightningPromise = null
+async function getLightning() {
+  if (lightningPromise) return lightningPromise
+  lightningPromise = (async () => {
+    const mod = await import('lightningcss-wasm')
+    await mod.default() // initialise wasm
+    return mod
+  })().catch(() => null)
+  return lightningPromise
+}
+
+export async function check(code) {
   if (!code.trim()) return []
   const errors = []
-  const usesModernAtRules = MODERN_AT_RULES.test(code)
-  const usesNesting       = /^\s*&|^\s*[.#][\w-]+\s*\{[^}]*[.#]/m.test(code) // heuristic
+  const useModern = MODERN_AT_RULES.test(code) || NESTING_HINT.test(code)
 
-  // Skip css-tree entirely on modern syntax — it'll false-positive.
-  if (!usesModernAtRules && !usesNesting) {
+  if (useModern) {
+    const lightning = await getLightning()
+    if (lightning) {
+      try {
+        // transform() throws on real parse errors; warnings come back on
+        // the result object but we ignore them here (this is a *syntax*
+        // checker, not a linter).
+        lightning.transform({
+          filename:  'input.css',
+          code:      new TextEncoder().encode(code),
+          minify:    false,
+          sourceMap: false,
+        })
+      } catch (err) {
+        errors.push(parseLightningError(err))
+      }
+    }
+    // If lightning failed to load, just skip parser-level checks for modern
+    // CSS — the brace balance below still catches structural bugs.
+  } else {
     try {
       csstree.parse(code, {
         parseAtrulePrelude: true,
         parseRulePrelude:   true,
         parseValue:         true,
-        onParseError(err) { errors.push(toDiag(err)) },
+        onParseError(err)   { errors.push(toDiag(err)) },
       })
     } catch (err) {
       errors.push(toDiag(err))
     }
   }
 
-  // Brace + comment balance — css-tree won't flag `.foo { color: red` (no
-  // closing `}`) or `/* comment` (no closing `*/`).
+  // Always run brace + comment balance — defends against parser leniency.
   const balance = checkStructuralBalance(code)
   if (balance) errors.push(balance)
 
-  return errors
+  return dedupe(errors)
+}
+
+function parseLightningError(err) {
+  // lightningcss-wasm errors arrive as { message, source, loc:{line,column} }
+  // or sometimes a plain string. Normalize both into our diagnostic shape.
+  const loc = err?.loc ?? {}
+  const m = loc.line ? null : String(err?.message ?? err).match(/(\d+):(\d+)/)
+  const message = (err?.data?.type ? `${err.data.type}: ` : '') +
+                  String(err?.message ?? err).split('\n')[0]
+  return {
+    line:     loc.line ?? (m ? parseInt(m[1]) : 1),
+    column:   Math.max(0, (loc.column ?? (m ? parseInt(m[2]) : 1)) - 1),
+    severity: 'error',
+    message,
+    type:     'Parse',
+  }
+}
+
+function dedupe(errors) {
+  const seen = new Set()
+  return errors.filter(e => {
+    const k = `${e.line}:${e.column}:${e.message}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
 }
 
 function toDiag(err) {

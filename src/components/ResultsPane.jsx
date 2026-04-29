@@ -6,7 +6,7 @@ export default function ResultsPane({
   language,
   diagnostics,
   isEmpty, isClean, showLoading, isRemote,
-  onJumpTo, onSample,
+  onJumpTo, onSample, onRetry,
   codeRef,
 }) {
   const errorCount = diagnostics.length
@@ -63,6 +63,7 @@ export default function ResultsPane({
             diagnostics={diagnostics}
             codeRef={codeRef}
             onJumpTo={onJumpTo}
+            onRetry={onRetry}
           />
         )}
       </div>
@@ -125,7 +126,7 @@ function CleanState({ langLabel }) {
   )
 }
 
-function ErrorList({ diagnostics, codeRef, onJumpTo }) {
+function ErrorList({ diagnostics, codeRef, onJumpTo, onRetry }) {
   return (
     <div className="error-list">
       {diagnostics.map((d, i) => (
@@ -135,6 +136,7 @@ function ErrorList({ diagnostics, codeRef, onJumpTo }) {
           diagnostic={d}
           code={codeRef.current}
           onJumpTo={onJumpTo}
+          onRetry={onRetry}
         />
       ))}
     </div>

@@ -157,6 +157,15 @@ export default function App() {
     []
   )
 
+  const handleRetry = useCallback(() => {
+    // Bypass the cache by adding the timestamp to the cache key path —
+    // simplest is to call run() which re-fetches. _remote.js's cache uses
+    // (language, code) so a fresh run with the same input will hit the
+    // cache. Better: clear cache via reset, then re-run.
+    reset()
+    run(codeRef.current, languageRef.current)
+  }, [reset, run])
+
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="app">
@@ -186,6 +195,7 @@ export default function App() {
           isRemote={isRemoteLang}
           onJumpTo={handleJumpTo}
           onSample={handleSample}
+          onRetry={handleRetry}
           codeRef={codeRef}
         />
       </main>

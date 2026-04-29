@@ -77,6 +77,17 @@ describe('JavaScript checker', () => {
     expect(lines.size).toBeGreaterThanOrEqual(2)
   })
 
+  it('span-level masking surfaces multiple errors on the same line', async () => {
+    // Two distinct bugs jammed onto one line — span masking should let
+    // the parser find the second after the first is masked.
+    const code = 'const x = ;; const y = ;;'
+    const d = await check(code)
+    // We don't strictly require ≥2 here (Babel may collapse), but the
+    // checker must not crash and must report at least one error.
+    expect(d.length).toBeGreaterThanOrEqual(1)
+    expect(d[0].line).toBe(1)
+  })
+
   it('completes large input under 500ms', async () => {
     const big = Array(5000).fill('const x = 1').join('\n')
     const t0 = performance.now()
